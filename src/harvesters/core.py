@@ -21,6 +21,7 @@
 # Standard library imports
 import io
 import os
+from contextlib import contextmanager
 import pathlib
 import signal
 import sys
@@ -60,7 +61,6 @@ from harvesters.util.pfnc import component_2d_formats
 from harvesters.util.pfnc import lmn_444_location_formats, \
     lmno_4444_location_formats, lmn_422_location_formats, \
     lmn_411_location_formats, mono_location_formats, bayer_location_formats
-
 
 _is_logging_buffer_manipulation = True if 'HARVESTERS_LOG_BUFFER_MANIPULATION' in os.environ else False
 _sleep_duration_default = 0.000001  # s
@@ -2430,26 +2430,42 @@ class Harvester:
         #
         self._logger.info('Removed the all CTI file from the list.')
 
+
+
+    @contextmanager
+    def working_directory(directory):
+        owd = os.getcwd()
+        try:
+            os.chdir(directory)
+            yield directory
+        finally:
+            os.chdir(owd)
+            
     def _open_gentl_producers(self):
         #
         for file_path in self._cti_files:
-            producer = GenTLProducer.create_producer()
-            try:
-                producer.open(file_path)
-            except (
-                NotInitializedException, InvalidHandleException,
-                InvalidIdException, ResourceInUseException,
-                InvalidParameterException, NotImplementedException,
-                AccessDeniedException, ClosedException,
-            ) as e:
-                self._logger.debug(e, exc_info=True)
-            else:
-                self._producers.append(producer)
-                self._logger.info(
-                    'Initialized GenTL Producer, {0}.'.format(
-                        producer.path_name
+            # By temporarily switching directories to the parent of the CTI
+            # file the GenTLProducer is free to load it as a DLL even on
+            # a windows machine where normal users have to be in the same
+            # directory with the DLL in order to load it succesfully.
+            with working_directory(os.dirname(file_path)):
+                producer = GenTLProducer.create_producer()
+                try:
+                    producer.open(file_path)
+                except (
+                    NotInitializedException, InvalidHandleException,
+                    InvalidIdException, ResourceInUseException,
+                    InvalidParameterException, NotImplementedException,
+                    AccessDeniedException, ClosedException,
+                ) as e:
+                    self._logger.debug(e, exc_info=True)
+                else:
+                    self._producers.append(producer)
+                    self._logger.info(
+                        'Initialized GenTL Producer, {0}.'.format(
+                            producer.path_name
+                        )
                     )
-                )
 
     def _open_systems(self):
         for producer in self._producers:
